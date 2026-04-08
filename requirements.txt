@@ -1,5 +1,5 @@
 python-telegram-bot==20.7
 apscheduler
-flask
 pytesseract
 pillow
+httpx==0.24.1
