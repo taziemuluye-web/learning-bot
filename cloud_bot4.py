@@ -1,4 +1,4 @@
-import logging
+hereimport logging
 import json
 import os
 import re
@@ -14,7 +14,6 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 from telegram.constants import ParseMode
-from flask import Flask, request
 
 # ----------------------------- OPTIONAL OCR -----------------------------
 try:
@@ -367,17 +366,14 @@ def can_access_other_grades(user_id):
     tier = bot_data["users"][uid].get("tier", "Basic")
     return tier in ["VIP", "VVIP"]
 
-# ================= NEW: user_has_access function =================
 def user_has_access(user_id, grade_id):
     uid = str(user_id)
-    # Check paid subscription
     if uid in bot_data["users"]:
         user = bot_data["users"][uid]
         if user["grade"] == grade_id:
             expiry = datetime.fromisoformat(user["expiry"])
             if expiry >= datetime.now():
                 return True
-    # Check free trial
     if uid in bot_data["free_trials"]:
         start = datetime.fromisoformat(bot_data["free_trials"][uid])
         if datetime.now() - start <= timedelta(minutes=10):
@@ -759,8 +755,7 @@ async def process_registration(update: Update, context: ContextTypes.DEFAULT_TYP
             f"Keep it safe. Use /start to access materials.\n\n{ADMIN_CONTACT}",
             parse_mode="Markdown"
         )
-
-# ----------------------------- ENHANCED EXAM SYSTEM -----------------------------
+        # ----------------------------- ENHANCED EXAM SYSTEM -----------------------------
 def parse_exam_content(content):
     questions = []
     blocks = content.strip().split("\n\n")
@@ -813,7 +808,7 @@ async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE, grade_i
         "total": total,
         "start_time": datetime.now().isoformat(),
         "time_limit": total_time,
-        "status": "running",
+        "status": "running",  # running, reviewing, finished
         "timer_tasks": []
     }
     save_data(bot_data)
@@ -962,6 +957,7 @@ async def finish_exam(bot, chat_id, exam_id):
             correct += 1
     wrong = total - correct
     wrong_percent = (wrong / total) * 100
+    # compute rank among all exam attempts
     all_attempts = bot_data.get("exam_attempts", [])
     all_attempts.append({
         "user_id": exam["user_id"],
@@ -1031,7 +1027,7 @@ async def admin_users_list(query):
     for uid, u in bot_data["users"].items():
         total_time = sum(a.get("duration", 0) for a in bot_data["user_activity"].get(uid, []))
         users.append((uid, u["ti"], u["full_name"], u["school"], u["grade_name"], total_time))
-    users.sort(key=lambda x: x[5])
+    users.sort(key=lambda x: x[5])  # least progress first
     text = "👥 **Users (least progress first)**\n\n"
     for uid, ti, name, school, grade, ttime in users[:20]:
         text += f"`{ti}` | {name[:15]} | {school[:15]} | {grade} | {ttime//60} min\n"
@@ -1191,8 +1187,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tier = parts[2]
         pkg = parts[3]
         await confirm_payment(query, grade_id, tier, pkg)
-
-    # ================= NEW: subjects_ callback (after payment) =================
     elif data.startswith("subjects_"):
         grade_id = data.replace("subjects_", "")
         if not user_has_access(user_id, grade_id):
@@ -1205,7 +1199,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(subject, callback_data=f"subject_{grade_id}_{subject}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")])
         await query.edit_message_text(f"📖 **{grade_name} - Subjects**\n\nChoose a subject:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
     elif data.startswith("subject_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1218,7 +1211,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(f"Chapter {i}", callback_data=f"chapter_{grade_id}_{subject}_{i}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Subjects", callback_data=f"subjects_{grade_id}")])
         await query.edit_message_text(f"📖 **{subject}**\n\nSelect chapter:", reply_markup=InlineKeyboardMarkup(keyboard))
-
     elif data.startswith("chapter_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1240,7 +1232,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("▶️ Video", callback_data=f"video_{grade_id}_{subject}_{chapter}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Chapters", callback_data=f"subject_{grade_id}_{subject}")])
         await query.edit_message_text(f"**{subject} - Chapter {chapter}**\n\nWhat would you like?", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
     elif data.startswith("note_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1262,7 +1253,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not ok:
             await query.message.reply_text(msg)
         update_usage(user_id, 30)
-
     elif data.startswith("problems_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1281,14 +1271,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"✏️ No problems for {subject} Chapter {chapter}.", parse_mode="Markdown")
         log_activity(user_id, grade_id, subject, chapter, "problems", 60)
         update_usage(user_id, 60)
-
     elif data.startswith("exam_"):
         parts = data.split("_")
         grade_id = parts[1]
         subject = parts[2]
         chapter = parts[3]
         await start_exam(update, context, grade_id, subject, chapter)
-
     elif data.startswith("pdf_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1302,7 +1290,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("📄 No PDF available.", parse_mode="Markdown")
         log_activity(user_id, grade_id, subject, chapter, "pdf", 30)
         update_usage(user_id, 30)
-
     elif data.startswith("video_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1317,37 +1304,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("🎥 No video available.", parse_mode="Markdown")
         log_activity(user_id, grade_id, subject, chapter, "video", 60)
         update_usage(user_id, 60)
-
     elif data.startswith("exam_answer_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
         letter = parts[3]
         await exam_answer_handler(update, context, exam_id, idx, letter)
-
     elif data.startswith("exam_flag_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
         await exam_flag_handler(update, context, exam_id, idx)
-
     elif data.startswith("exam_review_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
         await exam_review_handler(update, context, exam_id, idx)
-
     elif data.startswith("exam_review_answer_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
         letter = parts[3]
         await exam_review_answer_handler(update, context, exam_id, idx, letter)
-
     elif data.startswith("exam_back_to_flags_"):
         exam_id = data.split("_")[3]
         await show_flagged_review(context.bot, query.message.chat_id, exam_id)
-
     elif data == "exam_cancel":
         exam_id = context.user_data.get("current_exam")
         if exam_id and exam_id in bot_data["exam_sessions"]:
@@ -1356,11 +1337,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Exam cancelled.", reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Back to Chapter", callback_data=f"chapter_{context.user_data.get('current_grade', '1')}_{context.user_data.get('current_subject', '')}_{context.user_data.get('current_chapter', '1')}")
         ]]))
-
     elif data.startswith("exam_submit_"):
         exam_id = data.split("_")[2]
         await finish_exam(context.bot, query.message.chat_id, exam_id)
-
     else:
         await query.edit_message_text(f"❌ Unknown command.\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_main")
@@ -1553,7 +1532,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await process_registration(update, context)
         return
 
-    # Payment pending (transaction ID or screenshot)
+    # Payment pending (screenshot or transaction ID)
     if uid in bot_data["pending_payments"]:
         pending = bot_data["pending_payments"][uid]
         if not pending["sent_to_admin"] and (update.message.photo or update.message.document):
@@ -1613,47 +1592,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InlineKeyboardButton("🏠 Start Over", callback_data="restart")
     ]]))
 
-# ----------------------------- FLASK WEBHOOK SERVER -----------------------------
-flask_app = Flask(__name__)
-telegram_app = None
-
-@flask_app.route(f'/{BOT_TOKEN}', methods=['POST'])
-def webhook():
-    if telegram_app is None:
-        return 'Bot not ready', 500
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, telegram_app.bot)
-        telegram_app.process_update(update)
-        return 'OK', 200
-    except Exception as e:
-        print(f"Webhook error: {e}")
-        return 'Error', 500
-
-@flask_app.route('/health', methods=['GET'])
-def health():
-    return 'OK', 200
-
-async def setup_webhook():
-    webhook_url = os.environ.get('WEBHOOK_URL', '')
-    if not webhook_url:
-        print("⚠️ WEBHOOK_URL not set.")
-        return
-    full_url = f"{webhook_url}/{BOT_TOKEN}"
-    await telegram_app.bot.set_webhook(full_url)
-    print(f"✅ Webhook set to {full_url}")
-
-async def main():
-    global telegram_app
-    print("🚀 Starting bot in webhook mode...")
-    telegram_app = Application.builder().token(BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CallbackQueryHandler(button_handler))
-    telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL | filters.TEXT & ~filters.COMMAND, handle_message))
-    await telegram_app.initialize()
-    await setup_webhook()
-    port = int(os.environ.get('PORT', 5000))
-    flask_app.run(host='0.0.0.0', port=port)
+# ----------------------------- MAIN (polling mode) -----------------------------
+def main():
+    print("🚀 Starting bot in polling mode...")
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL | filters.TEXT & ~filters.COMMAND, handle_message))
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
