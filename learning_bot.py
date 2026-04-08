@@ -8,12 +8,11 @@ import tempfile
 import io
 import asyncio
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes
+    Updater, CommandHandler, CallbackQueryHandler,
+    MessageHandler, Filters, CallbackContext
 )
-from telegram.constants import ParseMode
 
 # ----------------------------- OPTIONAL OCR -----------------------------
 try:
@@ -398,7 +397,8 @@ async def read_file_content(grade_name, subject_name, chapter_num, file_type):
     except Exception as e:
         print(f"Error reading file: {e}")
         return None
-        # ----------------------------- OCR & PAYMENT VERIFICATION -----------------------------
+
+# ----------------------------- OCR & PAYMENT VERIFICATION -----------------------------
 async def extract_text_from_media(file_id, context):
     if not TESSERACT_AVAILABLE:
         return None
@@ -457,14 +457,14 @@ def is_transaction_valid(details, current_time):
         return False, "manual_review"
 
 # ----------------------------- BOT COMMANDS -----------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     device_fp = get_device_fingerprint(update)
     register_device(user_id, device_fp)
 
     uid = str(user_id)
     if uid not in bot_data["users"] and "temp_ti" in context.user_data:
-        await update.message.reply_text("Please enter your Tracking ID (TI) to restore access:")
+        update.message.reply_text("Please enter your Tracking ID (TI) to restore access:")
         context.user_data["awaiting_ti"] = True
         return
 
@@ -480,7 +480,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(user_id) in [str(uid) for uid in ADMIN_IDS]:
         keyboard.insert(0, [InlineKeyboardButton("🔐 Admin Login", callback_data="admin_login")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
+    update.message.reply_text(
         f"🎓 **Welcome to Learning Bot!**\n\n"
         "🔒 **SECURE ACCESS SYSTEM**\n"
         "• One Access ID = One Device\n"
@@ -489,12 +489,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Choose an option below:\n\n"
         f"{ADMIN_CONTACT}",
         reply_markup=reply_markup,
-        parse_mode="Markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
 
-async def user_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def user_guide(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     guide = """
 📘 **User Guide**
 
@@ -519,35 +519,36 @@ async def user_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Enjoy learning!** 🎓
 """
-    await query.edit_message_text(guide, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[
+    query.edit_message_text(guide, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[
         InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")
     ]]))
 
-async def free_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def free_trial(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     uid = str(query.from_user.id)
     if uid in bot_data["users"]:
-        await query.edit_message_text("❌ You already have a paid subscription. Free trial not available.", parse_mode="Markdown")
+        query.edit_message_text("❌ You already have a paid subscription. Free trial not available.", parse_mode=ParseMode.MARKDOWN)
         return
     if uid in bot_data["free_trials"]:
         start_t = datetime.fromisoformat(bot_data["free_trials"][uid])
         if datetime.now() - start_t <= timedelta(minutes=10):
             rem = 10 - (datetime.now() - start_t).seconds // 60
-            await query.edit_message_text(f"⏳ Active free trial! {rem} minutes left.\nUse 📚 Choose Grade/Course.", parse_mode="Markdown")
+            query.edit_message_text(f"⏳ Active free trial! {rem} minutes left.\nUse 📚 Choose Grade/Course.", parse_mode=ParseMode.MARKDOWN)
         else:
-            await query.edit_message_text("❌ Free trial expired. Please purchase a subscription.", parse_mode="Markdown")
+            query.edit_message_text("❌ Free trial expired. Please purchase a subscription.", parse_mode=ParseMode.MARKDOWN)
         return
     bot_data["free_trials"][uid] = datetime.now().isoformat()
     save_data(bot_data)
-    await query.edit_message_text(
+    query.edit_message_text(
         "✅ **Free trial activated!**\n\nYou have **10 minutes** of full access to **all grades and content**.\n"
         "Click **📚 Choose Grade/Course** to explore.\n\n⏰ After 10 minutes, purchase a subscription.\n\nEnjoy! 🎉",
-        parse_mode="Markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
 
-async def security_info(query):
-    await query.edit_message_text(
+def security_info(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.edit_message_text(
         f"🔒 **SECURITY INFORMATION**\n\n"
         "**Device Lock:** One Access ID per device.\n"
         "**Anti-Sharing:** Sharing = permanent ban.\n"
@@ -557,10 +558,11 @@ async def security_info(query):
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")
         ]]),
-        parse_mode="Markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
 
-async def show_grade_categories(query):
+def show_grade_categories(update: Update, context: CallbackContext):
+    query = update.callback_query
     keyboard = [
         [InlineKeyboardButton("📚 Lower Grades (1-4)", callback_data="category_lower")],
         [InlineKeyboardButton("📚 Middle Grades (5-8)", callback_data="category_middle")],
@@ -568,9 +570,10 @@ async def show_grade_categories(query):
         [InlineKeyboardButton("🎓 Exams & Higher", callback_data="category_exams")],
         [InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")]
     ]
-    await query.edit_message_text("📚 **Choose a Category**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text("📚 **Choose a Category**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def show_grades_by_range(query, category):
+def show_grades_by_range(update: Update, context: CallbackContext, category):
+    query = update.callback_query
     if category == "lower":
         grades = [["Grade 1", "grade_1"], ["Grade 2", "grade_2"], ["Grade 3", "grade_3"], ["Grade 4", "grade_4"]]
     elif category == "middle":
@@ -591,9 +594,10 @@ async def show_grades_by_range(query, category):
             row.append(InlineKeyboardButton(grades[i+1][0], callback_data=grades[i+1][1]))
         keyboard.append(row)
     keyboard.append([InlineKeyboardButton("🔙 Back to Categories", callback_data="back_to_categories")])
-    await query.edit_message_text("📚 **Select Grade**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text("📚 **Select Grade**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def show_account(query):
+def show_account(update: Update, context: CallbackContext):
+    query = update.callback_query
     uid = str(query.from_user.id)
     if uid in bot_data["users"]:
         u = bot_data["users"][uid]
@@ -622,9 +626,10 @@ async def show_account(query):
         text = f"No subscription.\nClick 🎁 Free Trial or purchase.\n\n{ADMIN_CONTACT}"
     keyboard = [[InlineKeyboardButton("📚 Browse Grades", callback_data="show_grades")],
                 [InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")]]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def show_package_tiers(query, grade_id):
+def show_package_tiers(update: Update, context: CallbackContext, grade_id):
+    query = update.callback_query
     grade_info = PRICES[grade_id]
     tiers = grade_info["tiers"]
     text = f"**{grade_info['name']}**\n\n"
@@ -651,9 +656,10 @@ async def show_package_tiers(query, grade_id):
             display = {"1M":"1 Month","3M":"3 Months","6M":"6 Months","1Y":"1 Year","FULL":"Full Access"}.get(pkg, pkg)
             keyboard.append([InlineKeyboardButton(f"{tier_name} - {display} ({price} birr)", callback_data=f"pkg_{grade_id}_{tier_name}_{pkg}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Grades", callback_data="back_to_categories")])
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def confirm_payment(query, grade_id, tier, package_type):
+def confirm_payment(update: Update, context: CallbackContext, grade_id, tier, package_type):
+    query = update.callback_query
     user_id = str(query.from_user.id)
     amount = PRICES[grade_id]["tiers"][tier][package_type]
     bot_data["pending_payments"][user_id] = {
@@ -668,7 +674,7 @@ async def confirm_payment(query, grade_id, tier, package_type):
         "sent_to_admin": False
     }
     save_data(bot_data)
-    await query.edit_message_text(
+    query.edit_message_text(
         f"💳 **PAYMENT REQUIRED**\n\n"
         f"**Grade:** {PRICES[grade_id]['name']}\n"
         f"**Tier:** {tier}\n"
@@ -679,11 +685,10 @@ async def confirm_payment(query, grade_id, tier, package_type):
         f"1. Send a screenshot of your payment (image or PDF)\n"
         f"2. Type your Transaction ID in a separate message.\n\n"
         f"⚠️ You must send both. Wait up to 10 minutes for verification.\n\n{ADMIN_CONTACT}",
-        parse_mode="Markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
 
-# ----------------------------- USER REGISTRATION -----------------------------
-async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, grade_id, tier, package_type, transaction_id):
+def register_user(update: Update, context: CallbackContext, user_id, grade_id, tier, package_type, transaction_id):
     uid = str(user_id)
     context.user_data["pending_registration"] = {
         "grade_id": grade_id,
@@ -691,23 +696,23 @@ async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE, user
         "package": package_type,
         "transaction_id": transaction_id
     }
-    await update.message.reply_text(
+    update.message.reply_text(
         "📝 **Registration required**\n\n"
         "Please provide the following information (one per message):\n"
         "1. Your **Full Name**\n"
         "2. Your **School Name**\n"
         "3. Your **Contact Phone Number**\n\n"
         "Type /cancel to abort.",
-        parse_mode="Markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
     context.user_data["reg_step"] = 1
 
-async def process_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def process_registration(update: Update, context: CallbackContext):
     text = update.message.text.strip()
     if text.lower() == "/cancel":
         context.user_data.pop("pending_registration", None)
         context.user_data.pop("reg_step", None)
-        await update.message.reply_text("Registration cancelled.")
+        update.message.reply_text("Registration cancelled.")
         return
     step = context.user_data.get("reg_step", 1)
     reg = context.user_data.get("pending_registration")
@@ -716,11 +721,11 @@ async def process_registration(update: Update, context: ContextTypes.DEFAULT_TYP
     if step == 1:
         context.user_data["reg_name"] = text
         context.user_data["reg_step"] = 2
-        await update.message.reply_text("✅ Name saved. Now send your **School Name**:")
+        update.message.reply_text("✅ Name saved. Now send your **School Name**:")
     elif step == 2:
         context.user_data["reg_school"] = text
         context.user_data["reg_step"] = 3
-        await update.message.reply_text("✅ School saved. Now send your **Contact Phone Number**:")
+        update.message.reply_text("✅ School saved. Now send your **Contact Phone Number**:")
     elif step == 3:
         context.user_data["reg_contact"] = text
         uid = str(update.effective_user.id)
@@ -749,13 +754,14 @@ async def process_registration(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("reg_name", None)
         context.user_data.pop("reg_school", None)
         context.user_data.pop("reg_contact", None)
-        await update.message.reply_text(
+        update.message.reply_text(
             f"✅ **Registration complete!**\n\n"
             f"Your Tracking ID (TI): `{ti}`\n"
             f"Keep it safe. Use /start to access materials.\n\n{ADMIN_CONTACT}",
-            parse_mode="Markdown"
+            parse_mode=ParseMode.MARKDOWN
         )
-        # ----------------------------- ENHANCED EXAM SYSTEM -----------------------------
+
+# ----------------------------- ENHANCED EXAM SYSTEM -----------------------------
 def parse_exam_content(content):
     questions = []
     blocks = content.strip().split("\n\n")
@@ -780,18 +786,18 @@ def parse_exam_content(content):
         questions.append({"text": q_text, "options": options, "correct": correct})
     return questions
 
-async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE, grade_id, subject, chapter):
+def start_exam(update: Update, context: CallbackContext, grade_id, subject, chapter):
     query = update.callback_query
     user_id = query.from_user.id
     uid = str(user_id)
     grade_name = PRICES[grade_id]["name"]
-    content = await read_file_content(grade_name, subject, chapter, "exam")
+    content = asyncio.run(read_file_content(grade_name, subject, chapter, "exam"))
     if not content:
-        await query.edit_message_text(f"📝 No exam questions for {subject} Chapter {chapter}.", parse_mode="Markdown")
+        query.edit_message_text(f"📝 No exam questions for {subject} Chapter {chapter}.", parse_mode=ParseMode.MARKDOWN)
         return
     questions = parse_exam_content(content)
     if not questions:
-        await query.edit_message_text("❌ Exam file format error.", parse_mode="Markdown")
+        query.edit_message_text("❌ Exam file format error.", parse_mode=ParseMode.MARKDOWN)
         return
     total = len(questions)
     total_time = total * EXAM_QUESTION_TIME
@@ -808,18 +814,19 @@ async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE, grade_i
         "total": total,
         "start_time": datetime.now().isoformat(),
         "time_limit": total_time,
-        "status": "running",  # running, reviewing, finished
+        "status": "running",
         "timer_tasks": []
     }
     save_data(bot_data)
     context.user_data["current_exam"] = exam_id
-    await send_exam_question(query, context, exam_id, 0)
+    send_exam_question(update, context, exam_id, 0)
 
-async def send_exam_question(query, context, exam_id, idx):
+def send_exam_question(update: Update, context: CallbackContext, exam_id, idx):
+    query = update.callback_query
     exam = bot_data["exam_sessions"].get(exam_id)
     if not exam or exam["status"] not in ["running", "reviewing"]:
         if query:
-            await query.edit_message_text("Exam session expired.")
+            query.edit_message_text("Exam session expired.")
         return
     q = exam["questions"][idx]
     total = exam["total"]
@@ -835,12 +842,13 @@ async def send_exam_question(query, context, exam_id, idx):
         keyboard.append([InlineKeyboardButton("❌ Cancel Exam", callback_data="exam_cancel")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     if query:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     else:
-        await context.bot.send_message(int(exam["user_id"]), text, reply_markup=reply_markup, parse_mode="Markdown")
+        context.bot.send_message(int(exam["user_id"]), text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     # schedule timer
-    async def timer_func():
-        await asyncio.sleep(EXAM_QUESTION_TIME)
+    def timer_func():
+        import time
+        time.sleep(EXAM_QUESTION_TIME)
         exam_now = bot_data["exam_sessions"].get(exam_id)
         if exam_now and exam_now["current_index"] == idx and exam_now["status"] == "running":
             exam_now["answers"][idx] = None
@@ -849,24 +857,29 @@ async def send_exam_question(query, context, exam_id, idx):
             if exam_now["current_index"] >= exam_now["total"]:
                 exam_now["status"] = "reviewing"
                 save_data(bot_data)
-                await show_flagged_review(context.bot, int(exam_now["user_id"]), exam_id)
+                show_flagged_review(context.bot, int(exam_now["user_id"]), exam_id)
             else:
-                await send_exam_question(None, context, exam_id, exam_now["current_index"])
-    task = asyncio.create_task(timer_func())
+                send_exam_question(None, context, exam_id, exam_now["current_index"])
+    import threading
+    t = threading.Thread(target=timer_func)
+    t.start()
     if "timer_tasks" not in exam:
         exam["timer_tasks"] = []
-    exam["timer_tasks"].append(task)
+    exam["timer_tasks"].append(t)
     save_data(bot_data)
 
-async def exam_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, exam_id, idx, letter):
+def exam_answer_handler(update: Update, context: CallbackContext, exam_id, idx, letter):
     query = update.callback_query
     exam = bot_data["exam_sessions"].get(exam_id)
     if not exam or exam["status"] != "running" or exam["current_index"] != idx:
-        await query.answer("Invalid or expired.")
+        query.answer("Invalid or expired.")
         return
     if exam.get("timer_tasks"):
         for t in exam["timer_tasks"]:
-            t.cancel()
+            try:
+                t.cancel()
+            except:
+                pass
         exam["timer_tasks"] = []
     exam["answers"][idx] = letter
     exam["current_index"] += 1
@@ -874,39 +887,42 @@ async def exam_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if exam["current_index"] >= exam["total"]:
         exam["status"] = "reviewing"
         save_data(bot_data)
-        await show_flagged_review(context.bot, query.message.chat_id, exam_id)
+        show_flagged_review(context.bot, query.message.chat_id, exam_id)
     else:
-        await send_exam_question(query, context, exam_id, exam["current_index"])
+        send_exam_question(update, context, exam_id, exam["current_index"])
 
-async def exam_flag_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, exam_id, idx):
+def exam_flag_handler(update: Update, context: CallbackContext, exam_id, idx):
     query = update.callback_query
     exam = bot_data["exam_sessions"].get(exam_id)
     if not exam or exam["status"] != "running" or exam["current_index"] != idx:
-        await query.answer("Invalid.")
+        query.answer("Invalid.")
         return
     exam["flagged"][idx] = True
     save_data(bot_data)
-    await query.answer("Question flagged for review.")
+    query.answer("Question flagged for review.")
     if exam.get("timer_tasks"):
         for t in exam["timer_tasks"]:
-            t.cancel()
+            try:
+                t.cancel()
+            except:
+                pass
         exam["timer_tasks"] = []
     exam["current_index"] += 1
     save_data(bot_data)
     if exam["current_index"] >= exam["total"]:
         exam["status"] = "reviewing"
         save_data(bot_data)
-        await show_flagged_review(context.bot, query.message.chat_id, exam_id)
+        show_flagged_review(context.bot, query.message.chat_id, exam_id)
     else:
-        await send_exam_question(query, context, exam_id, exam["current_index"])
+        send_exam_question(update, context, exam_id, exam["current_index"])
 
-async def show_flagged_review(bot, chat_id, exam_id):
+def show_flagged_review(bot, chat_id, exam_id):
     exam = bot_data["exam_sessions"].get(exam_id)
     if not exam:
         return
     flagged_indices = [i+1 for i, f in enumerate(exam["flagged"]) if f]
     if not flagged_indices:
-        await finish_exam(bot, chat_id, exam_id)
+        finish_exam(bot, chat_id, exam_id)
         return
     text = "🚩 **Flagged Questions**\n\nClick a number to review that question:\n"
     keyboard = []
@@ -919,13 +935,13 @@ async def show_flagged_review(bot, chat_id, exam_id):
     if row:
         keyboard.append(row)
     keyboard.append([InlineKeyboardButton("✅ Submit Exam", callback_data=f"exam_submit_{exam_id}")])
-    await bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def exam_review_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, exam_id, idx):
+def exam_review_handler(update: Update, context: CallbackContext, exam_id, idx):
     query = update.callback_query
     exam = bot_data["exam_sessions"].get(exam_id)
     if not exam or exam["status"] != "reviewing":
-        await query.answer("Expired.")
+        query.answer("Expired.")
         return
     q = exam["questions"][idx]
     text = f"**Question {idx+1}** (flagged)\n\n{q['text']}\n\nChoose your answer:"
@@ -933,20 +949,20 @@ async def exam_review_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     for letter, opt in q["options"].items():
         keyboard.append([InlineKeyboardButton(f"{letter}. {opt}", callback_data=f"exam_review_answer_{exam_id}_{idx}_{letter}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Flagged List", callback_data=f"exam_back_to_flags_{exam_id}")])
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def exam_review_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, exam_id, idx, letter):
+def exam_review_answer_handler(update: Update, context: CallbackContext, exam_id, idx, letter):
     query = update.callback_query
     exam = bot_data["exam_sessions"].get(exam_id)
     if not exam or exam["status"] != "reviewing":
-        await query.answer("Expired.")
+        query.answer("Expired.")
         return
     exam["answers"][idx] = letter
     save_data(bot_data)
-    await query.answer("Answer saved.")
-    await show_flagged_review(context.bot, query.message.chat_id, exam_id)
+    query.answer("Answer saved.")
+    show_flagged_review(context.bot, query.message.chat_id, exam_id)
 
-async def finish_exam(bot, chat_id, exam_id):
+def finish_exam(bot, chat_id, exam_id):
     exam = bot_data["exam_sessions"].pop(exam_id, None)
     if not exam:
         return
@@ -957,7 +973,6 @@ async def finish_exam(bot, chat_id, exam_id):
             correct += 1
     wrong = total - correct
     wrong_percent = (wrong / total) * 100
-    # compute rank among all exam attempts
     all_attempts = bot_data.get("exam_attempts", [])
     all_attempts.append({
         "user_id": exam["user_id"],
@@ -996,20 +1011,22 @@ async def finish_exam(bot, chat_id, exam_id):
     else:
         message = "Not using materials wisely. Improve yourself!"
     result = f"✅ **Exam finished!**\n\nScore: {correct}/{total}\n{message}\n\n{rank_msg}"
-    await bot.send_message(chat_id, result, parse_mode="Markdown")
+    bot.send_message(chat_id, result, parse_mode=ParseMode.MARKDOWN)
     log_activity(int(exam["user_id"]), exam["grade_id"], exam["subject"], exam["chapter"], "exam", 0, correct, total)
-    # ----------------------------- ADMIN PANEL -----------------------------
-async def admin_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# ----------------------------- ADMIN PANEL -----------------------------
+def admin_login(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     uid = str(query.from_user.id)
     if uid not in [str(uid) for uid in ADMIN_IDS]:
-        await query.edit_message_text("❌ Unauthorized.", parse_mode="Markdown")
+        query.edit_message_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
         return
     context.user_data["awaiting_admin_password"] = True
-    await query.edit_message_text("🔐 **Admin Login**\n\nPlease enter the password:", parse_mode="Markdown")
+    query.edit_message_text("🔐 **Admin Login**\n\nPlease enter the password:", parse_mode=ParseMode.MARKDOWN)
 
-async def show_admin_menu(query):
+def show_admin_menu(update: Update, context: CallbackContext):
+    query = update.callback_query
     keyboard = [
         [InlineKeyboardButton("👥 Users List", callback_data="admin_users")],
         [InlineKeyboardButton("📤 Upload File", callback_data="admin_upload")],
@@ -1020,14 +1037,15 @@ async def show_admin_menu(query):
         [InlineKeyboardButton("🏆 Weekly Leaderboard", callback_data="admin_leaderboard")],
         [InlineKeyboardButton("🚪 Logout", callback_data="admin_logout")]
     ]
-    await query.edit_message_text("🔧 **Admin Panel**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text("🔧 **Admin Panel**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def admin_users_list(query):
+def admin_users_list(update: Update, context: CallbackContext):
+    query = update.callback_query
     users = []
     for uid, u in bot_data["users"].items():
         total_time = sum(a.get("duration", 0) for a in bot_data["user_activity"].get(uid, []))
         users.append((uid, u["ti"], u["full_name"], u["school"], u["grade_name"], total_time))
-    users.sort(key=lambda x: x[5])  # least progress first
+    users.sort(key=lambda x: x[5])
     text = "👥 **Users (least progress first)**\n\n"
     for uid, ti, name, school, grade, ttime in users[:20]:
         text += f"`{ti}` | {name[:15]} | {school[:15]} | {grade} | {ttime//60} min\n"
@@ -1035,12 +1053,13 @@ async def admin_users_list(query):
     keyboard = []
     for uid, ti, name, school, grade, ttime in users[:20]:
         keyboard.append([InlineKeyboardButton(ti, callback_data=f"admin_user_detail_{uid}")])
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-async def admin_user_detail(query, user_id):
+def admin_user_detail(update: Update, context: CallbackContext, user_id):
+    query = update.callback_query
     uid = str(user_id)
     if uid not in bot_data["users"]:
-        await query.edit_message_text("User not found.")
+        query.edit_message_text("User not found.")
         return
     u = bot_data["users"][uid]
     activities = bot_data["user_activity"].get(uid, [])
@@ -1052,29 +1071,35 @@ async def admin_user_detail(query, user_id):
         if act.get('score') is not None:
             text += f" | Score: {act['score']}/{act['total']}"
         text += "\n"
-    await query.edit_message_text(text, parse_mode="Markdown")
+    query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
 
-async def admin_upload_start(query, context):
+def admin_upload_start(update: Update, context: CallbackContext):
+    query = update.callback_query
     context.user_data["admin_upload_step"] = 1
-    await query.edit_message_text("📤 **Upload File**\n\nSend the **grade name** (e.g., 'Grade 1'):", parse_mode="Markdown")
+    query.edit_message_text("📤 **Upload File**\n\nSend the **grade name** (e.g., 'Grade 1'):", parse_mode=ParseMode.MARKDOWN)
 
-async def admin_search_start(query, context):
+def admin_search_start(update: Update, context: CallbackContext):
+    query = update.callback_query
     context.user_data["admin_search"] = True
-    await query.edit_message_text("🔍 **Search User**\n\nSend TI, name, school, or contact:", parse_mode="Markdown")
+    query.edit_message_text("🔍 **Search User**\n\nSend TI, name, school, or contact:", parse_mode=ParseMode.MARKDOWN)
 
-async def admin_add_start(query, context):
+def admin_add_start(update: Update, context: CallbackContext):
+    query = update.callback_query
     context.user_data["admin_add_step"] = 1
-    await query.edit_message_text("➕ **Add User**\n\nSend TI (or type 'auto' to generate):", parse_mode="Markdown")
+    query.edit_message_text("➕ **Add User**\n\nSend TI (or type 'auto' to generate):", parse_mode=ParseMode.MARKDOWN)
 
-async def admin_remove_start(query, context):
+def admin_remove_start(update: Update, context: CallbackContext):
+    query = update.callback_query
     context.user_data["admin_remove"] = True
-    await query.edit_message_text("❌ **Remove User**\n\nSend the TI of the user to remove:", parse_mode="Markdown")
+    query.edit_message_text("❌ **Remove User**\n\nSend the TI of the user to remove:", parse_mode=ParseMode.MARKDOWN)
 
-async def admin_announce_start(query, context):
+def admin_announce_start(update: Update, context: CallbackContext):
+    query = update.callback_query
     context.user_data["admin_announce"] = True
-    await query.edit_message_text("📢 **Announcement**\n\nSend the message to broadcast to all users:", parse_mode="Markdown")
+    query.edit_message_text("📢 **Announcement**\n\nSend the message to broadcast to all users:", parse_mode=ParseMode.MARKDOWN)
 
-async def admin_leaderboard(query):
+def admin_leaderboard(update: Update, context: CallbackContext):
+    query = update.callback_query
     week_ago = datetime.now() - timedelta(days=7)
     points = {}
     for uid, acts in bot_data["user_activity"].items():
@@ -1093,104 +1118,101 @@ async def admin_leaderboard(query):
         u = bot_data["users"].get(uid, {})
         ti = u.get("ti", uid)
         text += f"{i}. `{ti}` - {pts} pts\n"
-    await query.edit_message_text(text, parse_mode="Markdown")
+    query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
 
-# ----------------------------- BUTTON HANDLER (main dispatcher) -----------------------------
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----------------------------- BUTTON HANDLER -----------------------------
+def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     data = query.data
     user_id = query.from_user.id
     uid = str(user_id)
 
-    # Security checks
     if uid in bot_data["blocked_users"]:
-        await query.edit_message_text(f"🚫 Account blocked.\n{ADMIN_CONTACT}", parse_mode="Markdown")
+        query.edit_message_text(f"🚫 Account blocked.\n{ADMIN_CONTACT}", parse_mode=ParseMode.MARKDOWN)
         return
     if not rate_limiter.check(user_id):
-        await query.edit_message_text("⏳ Too many requests. Please wait.", parse_mode="Markdown")
+        query.edit_message_text("⏳ Too many requests. Please wait.", parse_mode=ParseMode.MARKDOWN)
         return
     device_fp = get_device_fingerprint(update)
     if not check_device_access(user_id, device_fp):
         report_sharing_attempt(user_id)
-        await query.edit_message_text(f"🚫 Security alert: Access ID shared. Access revoked.\n{ADMIN_CONTACT}", parse_mode="Markdown")
+        query.edit_message_text(f"🚫 Security alert: Access ID shared. Access revoked.\n{ADMIN_CONTACT}", parse_mode=ParseMode.MARKDOWN)
         return
 
-    # Admin panel handling
     if data == "admin_login":
-        await admin_login(update, context)
+        admin_login(update, context)
         return
     if data == "admin_logout":
         bot_data["admin_logged_in"] = False
         save_data(bot_data)
-        await query.edit_message_text("Logged out.", reply_markup=InlineKeyboardMarkup([[
+        query.edit_message_text("Logged out.", reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")
         ]]))
         return
     if data.startswith("admin_"):
         if not bot_data.get("admin_logged_in", False):
-            await query.edit_message_text("❌ Not logged in as admin.", parse_mode="Markdown")
+            query.edit_message_text("❌ Not logged in as admin.", parse_mode=ParseMode.MARKDOWN)
             return
         if data == "admin_menu":
-            await show_admin_menu(query)
+            show_admin_menu(update, context)
         elif data == "admin_users":
-            await admin_users_list(query)
+            admin_users_list(update, context)
         elif data == "admin_upload":
-            await admin_upload_start(query, context)
+            admin_upload_start(update, context)
         elif data == "admin_search":
-            await admin_search_start(query, context)
+            admin_search_start(update, context)
         elif data == "admin_add":
-            await admin_add_start(query, context)
+            admin_add_start(update, context)
         elif data == "admin_remove":
-            await admin_remove_start(query, context)
+            admin_remove_start(update, context)
         elif data == "admin_announce":
-            await admin_announce_start(query, context)
+            admin_announce_start(update, context)
         elif data == "admin_leaderboard":
-            await admin_leaderboard(query)
+            admin_leaderboard(update, context)
         elif data.startswith("admin_user_detail_"):
             target_uid = data.split("_")[3]
-            await admin_user_detail(query, target_uid)
+            admin_user_detail(update, context, target_uid)
         return
 
-    # Main navigation
     if data == "show_grades":
-        await show_grade_categories(query)
+        show_grade_categories(update, context)
     elif data == "my_account":
-        await show_account(query)
+        show_account(update, context)
     elif data == "free_trial":
-        await free_trial(update, context)
+        free_trial(update, context)
     elif data == "user_guide":
-        await user_guide(update, context)
+        user_guide(update, context)
     elif data == "support":
-        await query.edit_message_text(f"📞 **Support**\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
+        query.edit_message_text(f"📞 **Support**\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")
-        ]]), parse_mode="Markdown")
+        ]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "security_info":
-        await security_info(query)
+        security_info(update, context)
     elif data == "restart" or data == "back_to_main":
-        await start(update, context)
+        start(update, context)
     elif data == "back_to_categories":
-        await show_grade_categories(query)
+        show_grade_categories(update, context)
     elif data.startswith("category_"):
         cat = data.split("_")[1]
-        await show_grades_by_range(query, cat)
+        show_grades_by_range(update, context, cat)
     elif data.startswith("grade_"):
         grade_id = data.split("_")[1]
         context.user_data["selected_grade"] = grade_id
         if not can_access_other_grades(user_id) and grade_id != bot_data["users"].get(uid, {}).get("grade"):
-            await query.edit_message_text("❌ You can only access the grade you purchased. Upgrade to VIP/VVIP for all grades.", parse_mode="Markdown")
+            query.edit_message_text("❌ You can only access the grade you purchased. Upgrade to VIP/VVIP for all grades.", parse_mode=ParseMode.MARKDOWN)
             return
-        await show_package_tiers(query, grade_id)
+        show_package_tiers(update, context, grade_id)
     elif data.startswith("pkg_"):
         parts = data.split("_")
         grade_id = parts[1]
         tier = parts[2]
         pkg = parts[3]
-        await confirm_payment(query, grade_id, tier, pkg)
+        confirm_payment(update, context, grade_id, tier, pkg)
     elif data.startswith("subjects_"):
         grade_id = data.replace("subjects_", "")
         if not user_has_access(user_id, grade_id):
-            await query.edit_message_text("Access denied. Please purchase a subscription or start a free trial.")
+            query.edit_message_text("Access denied. Please purchase a subscription or start a free trial.")
             return
         subjects = SUBJECTS.get(grade_id, [])
         grade_name = PRICES[grade_id]["name"]
@@ -1198,26 +1220,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for subject in subjects:
             keyboard.append([InlineKeyboardButton(subject, callback_data=f"subject_{grade_id}_{subject}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_main")])
-        await query.edit_message_text(f"📖 **{grade_name} - Subjects**\n\nChoose a subject:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        query.edit_message_text(f"📖 **{grade_name} - Subjects**\n\nChoose a subject:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     elif data.startswith("subject_"):
         parts = data.split("_")
         grade_id = parts[1]
         subject = parts[2]
         if not can_access_content(user_id, "shortnote"):
-            await query.edit_message_text("❌ Your tier does not allow accessing this content.", parse_mode="Markdown")
+            query.edit_message_text("❌ Your tier does not allow accessing this content.", parse_mode=ParseMode.MARKDOWN)
             return
         keyboard = []
         for i in range(1, 6):
             keyboard.append([InlineKeyboardButton(f"Chapter {i}", callback_data=f"chapter_{grade_id}_{subject}_{i}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Subjects", callback_data=f"subjects_{grade_id}")])
-        await query.edit_message_text(f"📖 **{subject}**\n\nSelect chapter:", reply_markup=InlineKeyboardMarkup(keyboard))
+        query.edit_message_text(f"📖 **{subject}**\n\nSelect chapter:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif data.startswith("chapter_"):
         parts = data.split("_")
         grade_id = parts[1]
         subject = parts[2]
         chapter = parts[3]
         if not user_has_access(user_id, grade_id):
-            await query.edit_message_text("Access denied. Please purchase a subscription or start a free trial.")
+            query.edit_message_text("Access denied. Please purchase a subscription or start a free trial.")
             return
         keyboard = []
         if can_access_content(user_id, "shortnote"):
@@ -1231,27 +1253,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if can_access_content(user_id, "video_tutorial"):
             keyboard.append([InlineKeyboardButton("▶️ Video", callback_data=f"video_{grade_id}_{subject}_{chapter}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Chapters", callback_data=f"subject_{grade_id}_{subject}")])
-        await query.edit_message_text(f"**{subject} - Chapter {chapter}**\n\nWhat would you like?", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        query.edit_message_text(f"**{subject} - Chapter {chapter}**\n\nWhat would you like?", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     elif data.startswith("note_"):
         parts = data.split("_")
         grade_id = parts[1]
         subject = parts[2]
         chapter = parts[3]
         grade_name = PRICES[grade_id]["name"]
-        content = await read_file_content(grade_name, subject, chapter, "shortnote")
+        content = asyncio.run(read_file_content(grade_name, subject, chapter, "shortnote"))
         if content:
             if len(content) > 4000:
-                await query.edit_message_text(content[:4000])
+                query.edit_message_text(content[:4000])
                 for i in range(4000, len(content), 4000):
-                    await query.message.reply_text(content[i:i+4000])
+                    query.message.reply_text(content[i:i+4000])
             else:
-                await query.edit_message_text(content)
+                query.edit_message_text(content)
         else:
-            await query.edit_message_text(f"📘 No notes for {subject} Chapter {chapter}.", parse_mode="Markdown")
+            query.edit_message_text(f"📘 No notes for {subject} Chapter {chapter}.", parse_mode=ParseMode.MARKDOWN)
         log_activity(user_id, grade_id, subject, chapter, "note", 30)
         ok, msg = check_user_limits(user_id)
         if not ok:
-            await query.message.reply_text(msg)
+            query.message.reply_text(msg)
         update_usage(user_id, 30)
     elif data.startswith("problems_"):
         parts = data.split("_")
@@ -1259,16 +1281,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subject = parts[2]
         chapter = parts[3]
         grade_name = PRICES[grade_id]["name"]
-        content = await read_file_content(grade_name, subject, chapter, "problems")
+        content = asyncio.run(read_file_content(grade_name, subject, chapter, "problems"))
         if content:
             if len(content) > 4000:
-                await query.edit_message_text(content[:4000])
+                query.edit_message_text(content[:4000])
                 for i in range(4000, len(content), 4000):
-                    await query.message.reply_text(content[i:i+4000])
+                    query.message.reply_text(content[i:i+4000])
             else:
-                await query.edit_message_text(content)
+                query.edit_message_text(content)
         else:
-            await query.edit_message_text(f"✏️ No problems for {subject} Chapter {chapter}.", parse_mode="Markdown")
+            query.edit_message_text(f"✏️ No problems for {subject} Chapter {chapter}.", parse_mode=ParseMode.MARKDOWN)
         log_activity(user_id, grade_id, subject, chapter, "problems", 60)
         update_usage(user_id, 60)
     elif data.startswith("exam_"):
@@ -1276,7 +1298,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         grade_id = parts[1]
         subject = parts[2]
         chapter = parts[3]
-        await start_exam(update, context, grade_id, subject, chapter)
+        start_exam(update, context, grade_id, subject, chapter)
     elif data.startswith("pdf_"):
         parts = data.split("_")
         grade_id = parts[1]
@@ -1285,9 +1307,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         grade_name = PRICES[grade_id]["name"]
         try:
             file_id = file_ids["pdf"][grade_name][subject][f"Chapter {chapter}"]
-            await query.message.reply_document(file_id)
+            query.message.reply_document(file_id)
         except:
-            await query.edit_message_text("📄 No PDF available.", parse_mode="Markdown")
+            query.edit_message_text("📄 No PDF available.", parse_mode=ParseMode.MARKDOWN)
         log_activity(user_id, grade_id, subject, chapter, "pdf", 30)
         update_usage(user_id, 30)
     elif data.startswith("video_"):
@@ -1299,9 +1321,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             url = file_ids["video"][grade_name][subject][f"Chapter {chapter}"]
             keyboard = [[InlineKeyboardButton("▶️ Watch Video", url=url)]]
-            await query.edit_message_text("Click the button to watch:", reply_markup=InlineKeyboardMarkup(keyboard))
+            query.edit_message_text("Click the button to watch:", reply_markup=InlineKeyboardMarkup(keyboard))
         except:
-            await query.edit_message_text("🎥 No video available.", parse_mode="Markdown")
+            query.edit_message_text("🎥 No video available.", parse_mode=ParseMode.MARKDOWN)
         log_activity(user_id, grade_id, subject, chapter, "video", 60)
         update_usage(user_id, 60)
     elif data.startswith("exam_answer_"):
@@ -1309,83 +1331,82 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         exam_id = parts[1]
         idx = int(parts[2])
         letter = parts[3]
-        await exam_answer_handler(update, context, exam_id, idx, letter)
+        exam_answer_handler(update, context, exam_id, idx, letter)
     elif data.startswith("exam_flag_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
-        await exam_flag_handler(update, context, exam_id, idx)
+        exam_flag_handler(update, context, exam_id, idx)
     elif data.startswith("exam_review_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
-        await exam_review_handler(update, context, exam_id, idx)
+        exam_review_handler(update, context, exam_id, idx)
     elif data.startswith("exam_review_answer_"):
         parts = data.split("_")
         exam_id = parts[1]
         idx = int(parts[2])
         letter = parts[3]
-        await exam_review_answer_handler(update, context, exam_id, idx, letter)
+        exam_review_answer_handler(update, context, exam_id, idx, letter)
     elif data.startswith("exam_back_to_flags_"):
         exam_id = data.split("_")[3]
-        await show_flagged_review(context.bot, query.message.chat_id, exam_id)
+        show_flagged_review(context.bot, query.message.chat_id, exam_id)
     elif data == "exam_cancel":
         exam_id = context.user_data.get("current_exam")
         if exam_id and exam_id in bot_data["exam_sessions"]:
             del bot_data["exam_sessions"][exam_id]
             save_data(bot_data)
-        await query.edit_message_text("Exam cancelled.", reply_markup=InlineKeyboardMarkup([[
+        query.edit_message_text("Exam cancelled.", reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🔙 Back to Chapter", callback_data=f"chapter_{context.user_data.get('current_grade', '1')}_{context.user_data.get('current_subject', '')}_{context.user_data.get('current_chapter', '1')}")
         ]]))
     elif data.startswith("exam_submit_"):
         exam_id = data.split("_")[2]
-        await finish_exam(context.bot, query.message.chat_id, exam_id)
+        finish_exam(context.bot, query.message.chat_id, exam_id)
     else:
-        await query.edit_message_text(f"❌ Unknown command.\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
+        query.edit_message_text(f"❌ Unknown command.\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_main")
         ]]))
-        # ----------------------------- MESSAGE HANDLER (for text and media) -----------------------------
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# ----------------------------- MESSAGE HANDLER -----------------------------
+def handle_message(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     uid = str(user_id)
     text = update.message.text
 
-    # Admin password login
     if context.user_data.get("awaiting_admin_password"):
         if text == ADMIN_PASSWORD:
             bot_data["admin_logged_in"] = True
             save_data(bot_data)
             context.user_data.pop("awaiting_admin_password")
-            await update.message.reply_text("✅ Admin login successful.", reply_markup=InlineKeyboardMarkup([[
+            update.message.reply_text("✅ Admin login successful.", reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔧 Admin Panel", callback_data="admin_menu")
             ]]))
         else:
             record_failed_attempt(user_id)
-            await update.message.reply_text("❌ Wrong password.")
+            update.message.reply_text("❌ Wrong password.")
         return
 
-    # Admin upload step-by-step
     if context.user_data.get("admin_upload_step"):
         step = context.user_data["admin_upload_step"]
         if step == 1:
             context.user_data["upload_grade"] = text
             context.user_data["admin_upload_step"] = 2
-            await update.message.reply_text("Send **subject name**:")
+            update.message.reply_text("Send **subject name**:")
         elif step == 2:
             context.user_data["upload_subject"] = text
             context.user_data["admin_upload_step"] = 3
-            await update.message.reply_text("Send **chapter number** (e.g., 1):")
+            update.message.reply_text("Send **chapter number** (e.g., 1):")
         elif step == 3:
             context.user_data["upload_chapter"] = text
             context.user_data["admin_upload_step"] = 4
-            await update.message.reply_text("Send **file type** (pdf / video / ppt / ministry_exercise / matric_exercise):")
+            update.message.reply_text("Send **file type** (pdf / video / ppt / ministry_exercise / matric_exercise):")
         elif step == 4:
             context.user_data["upload_type"] = text.lower()
             context.user_data["admin_upload_step"] = 5
             if text.lower() == "video":
-                await update.message.reply_text("Send the **YouTube URL**:")
+                update.message.reply_text("Send the **YouTube URL**:")
             else:
-                await update.message.reply_text("Send the **file** (document or photo):")
+                update.message.reply_text("Send the **file** (document or photo):")
         elif step == 5:
             if context.user_data["upload_type"] == "video":
                 url = text
@@ -1394,10 +1415,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chapter = context.user_data["upload_chapter"]
                 file_ids["video"].setdefault(grade, {}).setdefault(subject, {})[f"Chapter {chapter}"] = url
                 save_file_ids(file_ids)
-                await update.message.reply_text("✅ Video URL stored.")
+                update.message.reply_text("✅ Video URL stored.")
             else:
                 if not update.message.document:
-                    await update.message.reply_text("Please send a document.")
+                    update.message.reply_text("Please send a document.")
                     return
                 file_id = update.message.document.file_id
                 grade = context.user_data["upload_grade"]
@@ -1406,7 +1427,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ftype = context.user_data["upload_type"]
                 file_ids.setdefault(ftype, {}).setdefault(grade, {}).setdefault(subject, {})[f"Chapter {chapter}"] = file_id
                 save_file_ids(file_ids)
-                await update.message.reply_text("✅ File stored.")
+                update.message.reply_text("✅ File stored.")
             context.user_data.pop("admin_upload_step", None)
             context.user_data.pop("upload_grade", None)
             context.user_data.pop("upload_subject", None)
@@ -1414,7 +1435,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("upload_type", None)
         return
 
-    # Admin search
     if context.user_data.get("admin_search"):
         query = text.lower()
         results = []
@@ -1426,13 +1446,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "🔍 **Search results:**\n\n"
             for ti, name, school, contact in results[:10]:
                 msg += f"`{ti}` - {name} ({school})\n"
-            await update.message.reply_text(msg, parse_mode="Markdown")
+            update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         else:
-            await update.message.reply_text("No users found.")
+            update.message.reply_text("No users found.")
         context.user_data.pop("admin_search")
         return
 
-    # Admin remove
     if context.user_data.get("admin_remove"):
         ti = text.strip()
         found = None
@@ -1443,13 +1462,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if found:
             del bot_data["users"][found]
             save_data(bot_data)
-            await update.message.reply_text(f"✅ User {ti} removed.")
+            update.message.reply_text(f"✅ User {ti} removed.")
         else:
-            await update.message.reply_text("❌ User not found.")
+            update.message.reply_text("❌ User not found.")
         context.user_data.pop("admin_remove")
         return
 
-    # Admin add
     if context.user_data.get("admin_add_step"):
         step = context.user_data["admin_add_step"]
         if step == 1:
@@ -1458,39 +1476,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ti = generate_ti()
             context.user_data["add_ti"] = ti
             context.user_data["admin_add_step"] = 2
-            await update.message.reply_text("Send **full name**:")
+            update.message.reply_text("Send **full name**:")
         elif step == 2:
             context.user_data["add_name"] = text
             context.user_data["admin_add_step"] = 3
-            await update.message.reply_text("Send **school name**:")
+            update.message.reply_text("Send **school name**:")
         elif step == 3:
             context.user_data["add_school"] = text
             context.user_data["admin_add_step"] = 4
-            await update.message.reply_text("Send **contact number**:")
+            update.message.reply_text("Send **contact number**:")
         elif step == 4:
             context.user_data["add_contact"] = text
             context.user_data["admin_add_step"] = 5
-            await update.message.reply_text("Send **grade ID** (e.g., 1, 5, 11):")
+            update.message.reply_text("Send **grade ID** (e.g., 1, 5, 11):")
         elif step == 5:
             grade_id = text.strip()
             if grade_id not in PRICES:
-                await update.message.reply_text("Invalid grade ID.")
+                update.message.reply_text("Invalid grade ID.")
                 return
             context.user_data["add_grade"] = grade_id
             context.user_data["admin_add_step"] = 6
-            await update.message.reply_text("Send **tier** (Basic/VIP/VVIP):")
+            update.message.reply_text("Send **tier** (Basic/VIP/VVIP):")
         elif step == 6:
             tier = text.strip().capitalize()
             if tier not in ["Basic", "VIP", "VVIP"]:
-                await update.message.reply_text("Invalid tier.")
+                update.message.reply_text("Invalid tier.")
                 return
             context.user_data["add_tier"] = tier
             context.user_data["admin_add_step"] = 7
-            await update.message.reply_text("Send **package** (1M/3M/6M/1Y/FULL):")
+            update.message.reply_text("Send **package** (1M/3M/6M/1Y/FULL):")
         elif step == 7:
             pkg = text.strip()
             if pkg not in PRICES[context.user_data["add_grade"]]["tiers"][context.user_data["add_tier"]]:
-                await update.message.reply_text("Invalid package.")
+                update.message.reply_text("Invalid package.")
                 return
             expiry = get_expiry_date(pkg, context.user_data["add_tier"])
             bot_data["users"][str(update.effective_user.id)] = {
@@ -1506,7 +1524,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "original_transaction": "admin_add"
             }
             save_data(bot_data)
-            await update.message.reply_text(f"✅ User {context.user_data['add_ti']} added.")
+            update.message.reply_text(f"✅ User {context.user_data['add_ti']} added.")
             context.user_data.pop("admin_add_step", None)
             context.user_data.pop("add_ti", None)
             context.user_data.pop("add_name", None)
@@ -1516,61 +1534,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("add_tier", None)
         return
 
-    # Admin announcement
     if context.user_data.get("admin_announce"):
         for uid in bot_data["users"].keys():
             try:
-                await context.bot.send_message(int(uid), f"📢 **Announcement**\n\n{text}", parse_mode="Markdown")
+                context.bot.send_message(int(uid), f"📢 **Announcement**\n\n{text}", parse_mode=ParseMode.MARKDOWN)
             except:
                 pass
-        await update.message.reply_text("✅ Announcement sent to all users.")
+        update.message.reply_text("✅ Announcement sent to all users.")
         context.user_data.pop("admin_announce")
         return
 
-    # User registration flow
     if context.user_data.get("pending_registration") and context.user_data.get("reg_step"):
-        await process_registration(update, context)
+        process_registration(update, context)
         return
 
-    # Payment pending (screenshot or transaction ID)
     if uid in bot_data["pending_payments"]:
         pending = bot_data["pending_payments"][uid]
         if not pending["sent_to_admin"] and (update.message.photo or update.message.document):
             media = update.message.photo[-1] if update.message.photo else update.message.document
             file_id = media.file_id
-            ocr_text = await extract_text_from_media(file_id, context) if TESSERACT_AVAILABLE else None
+            ocr_text = asyncio.run(extract_text_from_media(file_id, context)) if TESSERACT_AVAILABLE else None
             details = parse_transaction_details(ocr_text) if ocr_text else {}
             pending["screenshot_file_id"] = file_id
             pending["screenshot_text"] = ocr_text
             save_data(bot_data)
             auto_valid, reason = is_transaction_valid(details, datetime.now()) if ocr_text else (False, "no_ocr")
             if auto_valid:
-                await update.message.reply_text("✅ Payment auto-verified! Please complete registration.")
-                await register_user(update, context, user_id, pending["grade_id"], pending["tier"], pending["package"], pending.get("transaction_id", "auto"))
+                update.message.reply_text("✅ Payment auto-verified! Please complete registration.")
+                register_user(update, context, user_id, pending["grade_id"], pending["tier"], pending["package"], pending.get("transaction_id", "auto"))
                 del bot_data["pending_payments"][uid]
                 save_data(bot_data)
             else:
                 try:
                     if update.message.photo:
-                        await context.bot.send_photo(ADMIN_IDS[0], file_id, caption=f"Payment from {uid}\nGrade: {pending['grade_id']}\nTier: {pending['tier']}\nPackage: {pending['package']}")
+                        context.bot.send_photo(ADMIN_IDS[0], file_id, caption=f"Payment from {uid}\nGrade: {pending['grade_id']}\nTier: {pending['tier']}\nPackage: {pending['package']}")
                     else:
-                        await context.bot.send_document(ADMIN_IDS[0], file_id, caption=f"Payment from {uid}\nGrade: {pending['grade_id']}\nTier: {pending['tier']}\nPackage: {pending['package']}")
+                        context.bot.send_document(ADMIN_IDS[0], file_id, caption=f"Payment from {uid}\nGrade: {pending['grade_id']}\nTier: {pending['tier']}\nPackage: {pending['package']}")
                 except:
                     pass
                 pending["sent_to_admin"] = True
                 save_data(bot_data)
-                await update.message.reply_text(f"📸 Screenshot received. Admin will verify soon.\n{ADMIN_CONTACT}", parse_mode="Markdown")
+                update.message.reply_text(f"📸 Screenshot received. Admin will verify soon.\n{ADMIN_CONTACT}", parse_mode=ParseMode.MARKDOWN)
             return
         elif not pending["transaction_id"] and text:
             pending["transaction_id"] = text
             save_data(bot_data)
-            await update.message.reply_text("✅ Transaction ID saved. Please also send a screenshot if not already sent.", parse_mode="Markdown")
+            update.message.reply_text("✅ Transaction ID saved. Please also send a screenshot if not already sent.", parse_mode=ParseMode.MARKDOWN)
             return
         else:
-            await update.message.reply_text(f"⏳ Your payment is being verified. Please wait.\n{ADMIN_CONTACT}", parse_mode="Markdown")
+            update.message.reply_text(f"⏳ Your payment is being verified. Please wait.\n{ADMIN_CONTACT}", parse_mode=ParseMode.MARKDOWN)
             return
 
-    # Returning user identification
     if context.user_data.get("awaiting_ti"):
         ti_input = text.strip()
         found = None
@@ -1581,26 +1595,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if found:
             device_fp = get_device_fingerprint(update)
             register_device(int(found), device_fp)
-            await update.message.reply_text(f"✅ Welcome back! Your TI `{ti_input}` is recognized. Use /start to access materials.", parse_mode="Markdown")
+            update.message.reply_text(f"✅ Welcome back! Your TI `{ti_input}` is recognized. Use /start to access materials.", parse_mode=ParseMode.MARKDOWN)
         else:
-            await update.message.reply_text("❌ TI not found. Please check or contact admin.")
+            update.message.reply_text("❌ TI not found. Please check or contact admin.")
         context.user_data.pop("awaiting_ti")
         return
 
-    # No pending payment, no registration, no admin
-    await update.message.reply_text(f"I don't understand. Type /start to begin.\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
+    update.message.reply_text(f"I don't understand. Type /start to begin.\n{ADMIN_CONTACT}", reply_markup=InlineKeyboardMarkup([[
         InlineKeyboardButton("🏠 Start Over", callback_data="restart")
     ]]))
 
-# ----------------------------- MAIN (polling mode) -----------------------------
+# ----------------------------- MAIN -----------------------------
 def main():
     print("🚀 Starting bot in polling mode...")
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL | filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("menu", start))
+    dp.add_handler(CommandHandler("home", start))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+    dp.add_handler(MessageHandler(Filters.photo | Filters.document | Filters.text & ~Filters.command, handle_message))
+
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
-
